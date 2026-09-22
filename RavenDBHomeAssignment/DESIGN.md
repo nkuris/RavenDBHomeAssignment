@@ -115,40 +115,74 @@
 
 ---
 
-## Testing Gaps & Hard-to-Test Scenarios
+## Testing Gaps & Test Coverage
 
-### Implemented
-✅ Happy path (write→replicate→read)
-✅ Read-your-writes consistency
-✅ Idempotency (duplicate LSN)
-✅ Backpressure (bulk writes)
+### Comprehensive Test Suite (23 Tests)
 
-### Not Tested (Awkward to Set Up)
-- **Replica crash mid-replication:** Need process kill/restart
-- **Network partition:** Would need network simulation or TCP socket tearing
+#### ✅ CacheStore Unit Tests (11 tests)
+Core functionality of the in-memory cache store with idempotent updates and LSN ordering:
+
+1. **Idempotency & LSN Ordering (6 tests)**
+   - `TryApplyUpdate_NewKey_Succeeds` - Verify new keys are inserted
+   - `TryApplyUpdate_SameLsnTwice_SecondFails` - Reject duplicate LSN (idempotency)
+   - `TryApplyUpdate_LowerLsn_Rejected` - Reject out-of-order updates with lower LSN
+   - `TryApplyUpdate_HigherLsn_Succeeds` - Accept updates with higher LSN
+   - `TryApplyUpdate_ZeroLsn_Rejected` - Reject invalid LSN (zero not allowed)
+   - `TryApplyUpdate_NegativeLsn_Rejected` - Reject invalid LSN (negative not allowed)
+
+2. **Read-Your-Writes Consistency (1 test)**
+   - `GetAsync_ReadYourWrites_WaitsForLsn` - Verify polling behavior when minLsn > currentLsn
+
+3. **Key Retrieval (2 tests)**
+   - `GetAsync_KeyNotFound_ReturnsNull` - Non-existent keys return null
+   - `GetAsync_KeyExists_ReturnsValue` - Existing keys return correct value
+
+4. **Multi-Key Independence (2 tests)**
+   - `GetAsync_MultipleKeys_Independent` - Multiple keys don't interfere with each other
+   - `TryApplyUpdate_MultipleKeys_Independent` - Updates to different keys are independent
+
+#### ✅ CacheClient Integration Tests (6 tests)
+Test the client's operations against a running Primary node:
+
+1. **Basic Operations (3 tests)**
+   - `SetAndGet_BasicOperation` - Write and read succeed
+   - `Delete_RemovesKey` - DELETE removes keys correctly
+   - `Get_NonExistentKey_ReturnsNull` - GET on missing key returns null
+
+2. **Sequential Operations (2 tests)**
+   - `MultipleOperations_Sequential` - Multiple SET/GET operations in sequence
+   - `UpdateSameKey_LatestValueReturned` - Multiple updates to same key return latest
+
+3. **LSN Tracking (1 test)**
+   - `LastObservedLsn_UpdatedAfterWrite` - Client LSN field updates after writes
+
+#### ✅ Replication Behavior Tests (5 tests)
+Verify replication from Primary to Replicas, data consistency, and read-your-writes guarantees:
+
+1. **Single Replica (1 test)**
+   - `ReplicaReceivesDataFromPrimary` - Data written to Primary appears on Replica
+
+2. **Multiple Replicas (2 tests)**
+   - `MultipleReplicasReceiveData` - Data propagates to all Replicas
+   - `ReplicaIsReadOnly` - Replica correctly rejects write attempts
+
+3. **Consistency Guarantees (2 tests)**
+   - `ReadYourWritesConsistency_AcrossNodes` - Client sees its own writes when reading from Replica
+   - `SequentialWrites_MaintainOrder` - Multiple writes to same key maintain order on Replicas
+
+#### ✅ Replication Connection Test (1 test)
+Verify cluster setup and initial connection establishment:
+
+1. **Connection Setup (1 test)**
+   - `PrimaryConnectsToReplicaReplicationPorts` - Primary successfully connects to Replicas
+
+### Not Tested (Difficult to Simulate)
+- **Replica crash mid-replication:** Would need process kill or socket teardown
+- **Network partition:** Requires network simulation or TCP socket interruption
 - **Concurrent client failures:** Hard to inject failures synchronously
-- **Replication lag measurement:** Would need instrumented time tracking
-- **Backpressure blocking:** BoundedChannel doesn't expose queue depth; would need reflection or custom channel
-
-### Would Test With More Time
-1. **Network Fault Injection:**
-   ```csharp
-   // Simulated 100ms latency on Replica reader
-   await Task.Delay(100);  // Before applying message
-   ```
-
-2. **Replica Reader Slowdown:**
-   ```csharp
-   // Primary floods with 10,000 writes
-   // Replica reader has artificial delay
-   // Verify Primary write loop eventually blocks
-   ```
-
-3. **Out-of-Order Replication:**
-   ```csharp
-   // Intercept messages, reorder them
-   // Verify Replica ignores out-of-order (old LSN)
-   ```
+- **Replication lag measurement:** Would need instrumented timing throughout the pipeline
+- **Backpressure blocking verification:** BoundedChannel capacity doesn't expose current depth
+- **TCP connection timeouts and retries:** Would need network fault injection
 
 ---
 
@@ -185,8 +219,12 @@
 This implementation prioritizes **correctness and clarity** over performance or completeness:
 - ✅ Guarantees: Read-your-writes, convergence, idempotency
 - ✅ Clean architecture: Protocol, Server, Client separation
-- ✅ Testable: 5 high-value integration tests
+- ✅ Comprehensive test suite: 23 tests across 4 test files (unit + integration)
+- ✅ Test coverage: Cache store logic, client operations, replication behavior, connection setup
 - ⚠️ Trade-offs: In-memory only, polling-based coordination, fixed topology
 - ❌ Not included: Persistence, failover, dynamic membership, binary encoding
 
-**Total code: ~800 lines** — tight, focused, and defense-in-depth on consistency.
+**Total code:**
+- Implementation: ~800 lines
+- Tests: ~400 lines (23 tests)
+- **Total: ~1,200 lines** — tight, focused, and defense-in-depth on consistency.

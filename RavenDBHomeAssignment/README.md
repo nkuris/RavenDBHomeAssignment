@@ -34,15 +34,55 @@ dotnet build
 
 ## Running Tests
 
+### Using Visual Studio Test Explorer
+1. Open **Test Explorer** via __View > Test Explorer__ (or press `Ctrl+E, T`)
+2. Click **Run All Tests** button to execute all 23 tests
+3. View results and detailed output in the Test Explorer window
+
+### Using Command Line
 ```bash
+# Run all tests
 dotnet test
+
+# Run with verbose output
+dotnet test --verbosity detailed
+
+# Run specific test class
+dotnet test --filter "ClassName=RavenDBHomeAssignment.Tests.CacheStoreTests"
 ```
 
-### Test Scenarios
-- **HappyPath_WritePrimary_PropagatesToReplicas:** Write on Primary, verify both Replicas receive it
-- **ReadYourWrites_ClientWaitsForMinLsnOnReplica:** Write→Primary, immediately read→Replica, verify consistency
-- **Convergence_DuplicateAndOutOfOrderLsn_IsIdempotent:** Send duplicate writes, verify only applied once
-- **Backpressure_MultipleWritesPropagate:** Rapid writes to Primary, verify all propagate to Replicas
+### Test Coverage (23 Tests Total)
+
+#### CacheStore Unit Tests (11 tests)
+- `TryApplyUpdate_NewKey_Succeeds` - New key insertion
+- `TryApplyUpdate_SameLsnTwice_SecondFails` - Idempotent duplicate rejection
+- `TryApplyUpdate_LowerLsn_Rejected` - Reject out-of-order LSN updates
+- `TryApplyUpdate_HigherLsn_Succeeds` - Accept higher LSN updates
+- `TryApplyUpdate_ZeroLsn_Rejected` - Reject invalid LSN (zero)
+- `TryApplyUpdate_NegativeLsn_Rejected` - Reject invalid LSN (negative)
+- `GetAsync_KeyNotFound_ReturnsNull` - Non-existent key handling
+- `GetAsync_KeyExists_ReturnsValue` - Key retrieval
+- `GetAsync_ReadYourWrites_WaitsForLsn` - LSN wait behavior
+- `GetAsync_MultipleKeys_Independent` - Multi-key independence
+- `TryApplyUpdate_MultipleKeys_Independent` - Multi-key update independence
+
+#### CacheClient Integration Tests (6 tests)
+- `SetAndGet_BasicOperation` - Basic SET/GET workflow
+- `Delete_RemovesKey` - DELETE operation
+- `Get_NonExistentKey_ReturnsNull` - Non-existent key read
+- `MultipleOperations_Sequential` - Sequential operation chain
+- `UpdateSameKey_LatestValueReturned` - Multiple updates to same key
+- `LastObservedLsn_UpdatedAfterWrite` - LSN tracking after writes
+
+#### Replication Behavior Tests (5 tests)
+- `ReplicaReceivesDataFromPrimary` - Single replica data replication
+- `MultipleReplicasReceiveData` - Multi-replica data propagation
+- `ReplicaIsReadOnly` - Replica write rejection
+- `ReadYourWritesConsistency_AcrossNodes` - Cross-node consistency guarantee
+- `SequentialWrites_MaintainOrder` - Write ordering maintenance
+
+#### Replication Connection Test (1 test)
+- `PrimaryConnectsToReplicaReplicationPorts` - Primary→Replica connection establishment
 
 ## Running the Cluster
 
@@ -70,7 +110,10 @@ RavenDBHomeAssignment/
 ├── Client/
 │   └── CacheClient.cs           # Test client with auto LSN tracking
 └── Tests/
-	└── CacheClusterTests.cs     # xUnit integration tests
+	├── CacheStoreTests.cs        # 11 unit tests for cache store
+	├── CacheClientOperationsTest.cs  # 6 integration tests for client operations
+	├── ReplicationBehaviorTest.cs    # 5 integration tests for replication
+	└── ReplicationConnectionTest.cs  # 1 integration test for connection setup
 ```
 
 ## Design Decisions
@@ -118,11 +161,23 @@ await pipeline.EnqueueAsync(msg);  // Blocks if 1000+ messages queued
 
 ## Testing Notes
 
-Tests use `IAsyncLifetime` to spin up a full 3-node cluster for each test class, then tear down. Each test is ~100-500ms due to replication latency and polling delays.
+### Test Organization
+Tests are organized into 4 separate files for clarity and maintainability:
+- **CacheStoreTests.cs:** Unit tests for the core cache store logic (idempotency, LSN ordering)
+- **CacheClientOperationsTest.cs:** Integration tests for client SET/GET/DELETE operations
+- **ReplicationBehaviorTest.cs:** Integration tests for replication and consistency
+- **ReplicationConnectionTest.cs:** Connection setup and node orchestration
+
+### Test Execution
+- Each test spins up a complete 3-node cluster (Primary + 2 Replicas)
+- Tests use `CancellationTokenSource` with 10-15 second timeouts
+- Replication latency: ~10-500ms (TCP round-trip + async processing)
+- Full test suite completes in ~13 seconds on standard hardware
 
 ### Timeout Configuration
-- Test timeout: 30 seconds (via `CancellationTokenSource`)
-- Replication wait: 200ms (empirical; accounts for async pipeline + store polling)
+- Per-test timeout: 10-15 seconds (via `CancellationTokenSource`)
+- Replication wait: 100-500ms (empirical; accounts for async replication + processing)
+- Allow sufficient time for TCP socket establishment and inter-process communication
 
 ## Performance Characteristics
 
@@ -140,4 +195,6 @@ Tests use `IAsyncLifetime` to spin up a full 3-node cluster for each test class,
 
 ## Line Count
 
-Total: ~800 lines (protocol + server + client + tests)
+- **Implementation:** ~800 lines (protocol + server + client)
+- **Tests:** ~400 lines (23 comprehensive tests across 4 test files)
+- **Total:** ~1,200 lines
